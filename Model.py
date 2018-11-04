@@ -42,35 +42,34 @@ def training_testing_data(data_input, expected_output ):
 
 def init_weight(shape,bound,name):
     """ Weight initialization """
-    weight = np.random.uniform(-bound,bound,shape)
-    return tf.Variable(weight,name = name,dtype = tf.float32)
+    weight = np.random.uniform(-bound,bound,shape).astype('float32')
+    return tf.Variable(weight,name = name)
 
 def reinit_weight(shape,bound):
     """ Weight re-initialization """
-    weight = np.random.uniform(-bound,bound,shape,dtype = tf.float32)
-    weight
+    weight = np.random.uniform(-bound,bound,shape).astype('float32')
     return weight
 
 
 def init_bias_input(shape,name):
     """ Bias initialization """
-    bias = np.full(shape,0.1)
-    return tf.Variable(bias,name = name,dtype = tf.float32)
+    bias = np.full(shape,0.1).astype('float32')
+    return tf.Variable(bias,name = name)
 
 def reinit_bias_input(shape):
     """ Bias re-initialization """
-    bias = np.full(shape,0.1,dtype = np.float32)
+    bias = np.full(shape,0.1).astype('float32')
     return bias
 
 
 def init_bias_output(shape,name):
     """ Bias_Output initialization """
-    bias = np.full(shape,0.01)
-    return tf.Variable(bias,name = name,dtype = tf.float32)
+    bias = np.full(shape,0.01).astype('float32')
+    return tf.Variable(bias,name = name)
 
 def reinit_bias_output(shape):
     """ Bias re-initialization """
-    bias = np.full(shape,0.01,dtype = np.float32)
+    bias = np.full(shape,0.01).astype('float32')
     return bias
 
 
@@ -364,8 +363,8 @@ def main():
     Y = tf.placeholder(tf.float32, shape=[None, 1])
     
     # Init the weights
-    W1 = init_weight((n_components, n_hidden_1),1/8,'W1')
-    W2 = init_weight((n_hidden_1, n_classes),1/4,'W2')
+    W1 = init_weight((n_components, n_hidden_1),1,'W1')
+    W2 = init_weight((n_hidden_1, n_classes),1/2,'W2')
     
     # Init the biases
     b1 = init_bias_input(n_hidden_1,'b1')
@@ -376,10 +375,12 @@ def main():
     beta = init_beta()
     
     
-    # Size of variables
+    # List of variables
     variables = []
     for variable in tf.trainable_variables():
         variables.append(variable)
+    
+    
 
     # Models
     Yhat_relu = model_relu(X,W1,W2,b1,b2)
@@ -406,6 +407,18 @@ def main():
         size = variable_size[-1]+tf.size(variable)
         variable_size.append(size)
 
+    delta = tf.zeros((model_size,1), tf.float32)
+    delta_w1 = tf.zeros((n_components,n_hidden_1), tf.float32)
+    new_w1 = tf.zeros((n_components,n_hidden_1), tf.float32)
+    delta_w2 = tf.zeros((n_hidden_1,n_classes), tf.float32)
+    new_w2 = tf.zeros((n_hidden_1,n_classes), tf.float32)
+    delta_b1 = tf.zeros((n_hidden_1,1), tf.float32)
+    new_b1 = tf.zeros((n_hidden_1,1), tf.float32)
+    delta_b2 = tf.zeros((n_classes,1), tf.float32)
+    new_b2 = tf.zeros((n_classes,1), tf.float32)
+    j = tf.zeros((n_testcases,n_components), tf.float32)
+    h = tf.zeros((model_size,model_size), tf.float32)
+
     loop = 0
     flag_stop = False
     while(True):
@@ -414,9 +427,10 @@ def main():
         learning_coeffient = comb_coeffient
         round = 0
 
-        while (round < 12):
+        while (round < 20):
     
-            damp = 25
+            print("Round: ",round)
+            damp = 10
             
             yhat = sess.run(Yhat_sigmoid, feed_dict = {X:X_train,Y: Y_train})
             j = sess.run(j_holder,feed_dict = {X:X_train,Y: Y_train})
@@ -428,11 +442,12 @@ def main():
             flag_exit = False
             count = 1
             while (count < 6):
-                 h_adj = hessian_adj_func(j,learning_coeffient)
+                 h = hessian_adj_func(j,learning_coeffient)
                  delta = tf.matmul(j,error,True)
-                 delta = tf.matmul(h_adj,delta)
-                 delta_w1,delta_w2,delta_b1,delta_b2 = delta_weight(delta,variable_size,n_components)
+                 delta = tf.matmul(h,delta)
                  
+                 delta_w1,delta_w2,delta_b1,delta_b2 = delta_weight(delta,variable_size,n_components)
+                
                  # Update weights
                  new_w1 = sess.run(W1 - delta_w1)
                  new_w2 = sess.run(W2 - delta_w2)
@@ -444,28 +459,36 @@ def main():
                  b1 = tf.assign(b1,new_b1)
                  b2 = tf.assign(b2,new_b2)
                  
+                 sess.run(W1)
+                 sess.run(W2)
+                 sess.run(b1)
+                 sess.run(b2)
+                 
                  # Update objective
                  new_objective = sess.run(objective_holder,feed_dict = {X:X_train,Y: Y_train})
                  print("new_objective: ",new_objective)
                  less_objective = sess.run(tf.less(new_objective,objective))
                  
                  if less_objective:
-                    del j
-                    del h_adj
-                    gc.collect()
                     
-                    h_inv = hessian_adj_func(j_holder,comb_coeffient)
-                    para_holder = update_hyperparam(h_inv,loss_holder,regularization_holder,model_size,n_components)
+                    h = hessian_adj_func(j_holder,comb_coeffient)
+                    para_holder = update_hyperparam(h,loss_holder,regularization_holder,model_size,n_components)
                     alpha,beta,gamma = sess.run(para_holder,feed_dict = {X:X_train,Y: Y_train})
                     print("%s , %s , %s"  % (alpha,beta,gamma))
                     learning_coeffient /= damp
-                    del new_w1,new_w2,new_b1,new_b2
-                    del delta_w1,delta_w2,delta_b1,delta_b2
-                    del h_inv
-                    gc.collect()
+                    
+                    yhat = sess.run(Yhat_sigmoid, feed_dict = {X:X_test,Y: Y_test})
+                    accuracy = sess.run(model_accuracy(yhat,Y_test))
+                    print("Accuracy: ",accuracy)
+                    if(accuracy >= accuracy_stop):
+                         flag_stop = True
+                         break
+                    
+                    round += 1
+                    flag_exit = True
                     break
                  else:
-                    if count < 5:
+                     if count < 5:
                         learning_coeffient *= damp
                         
                         # Restore weights
@@ -473,54 +496,48 @@ def main():
                         W2 = tf.assign(W2,new_w2 + delta_w2)
                         b1 = tf.assign(b1,new_b1 + delta_b1)
                         b2 = tf.assign(b2,new_b2 + delta_b2)
-                    
-                        del new_w1,new_w2,new_b1,new_b2
-                        del delta_w1,delta_w2,delta_b1,delta_b2
-                        gc.collect()
-                    
-                    else:
-                        flag_exit = True
-
-                 count += 1
-                 if flag_exit:
-                     
-                     del new_w1,new_w2,new_b1,new_b2
-                     del delta_w1,delta_w2,delta_b1,delta_b2
-                     gc.collect()
-                     break
-            if not flag_exit:
-                yhat = sess.run(Yhat_sigmoid, feed_dict = {X:X_test,Y: Y_test})
-                accuracy = sess.run(model_accuracy(yhat,Y_test))
-                print(accuracy)
-                if(accuracy >= accuracy_stop):
-                    flag_stop = True
+                        sess.run(W1)
+                        sess.run(W2)
+                        sess.run(b1)
+                        sess.run(b2)
+                        
+                        count += 1
+                        round += 1
+                     else:
+                         learning_coeffient *= damp
+                         round += 1
+                         break
+            if flag_exit:
+                if round >= 20:
                     break
-                round  += 1
-            if(round == 12):
-                loop += 1
-                
-                # Re-init the weights
-                reinit_w1 = reinit_weight((n_components, n_hidden_1),1)
-                W1 = tf.assign(W1, reinit_w1)
-                reinit_w2 = reinit_weight((n_hidden_1, n_classes),1/2)
-                W2 = tf.assign(W2,reinit_w2)
-                
-                # Re-init the biases
-                reinit_b1 = reinit_bias_input(n_hidden_1)
-                b1 = tf.assign(b1,reinit_b1)
-                reinit_b2 = reinit_bias_output(n_classes)
-                b2 = tf.assign(b2, reinit_b2)
-                
-                # Re-init hyperparameters
-                alpha = reinit_alpha()
-                beta = reinit_beta()
-                
-                del reinit_w1,reinit_w2,reinit_b1,reinit_b2
-                gc.collect()
+            if flag_stop:
                 break
-    
         if flag_stop:
             break
+        
+        loop += 1
+        print("new loop")
+        # Re-init the weights
+        new_w1 = reinit_weight((n_components, n_hidden_1),1)
+        W1 = tf.assign(W1, new_w1)
+    
+        new_w2 = reinit_weight((n_hidden_1, n_classes),1/2)
+        W2 = tf.assign(W2, new_w2)
+        
+        # Re-init the biases
+        new_b1 = reinit_bias_input(n_hidden_1)
+        b1 = tf.assign(b1, new_b1)
+        new_b2 = reinit_bias_output(n_classes)
+        b2 = tf.assign(b2, new_b2)
+        
+        sess.run(W1)
+        sess.run(W2)
+        sess.run(b1)
+        sess.run(b2)
+        # Re-init hyperparameters
+        alpha = reinit_alpha()
+        beta = reinit_beta()
+    
 
     sess.close
 
