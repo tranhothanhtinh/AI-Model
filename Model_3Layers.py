@@ -12,7 +12,7 @@ print('Python Version ',platform.sys.version)
 
 
 n_hidden_1 = 15
-n_hidden_2 = 8
+n_hidden_2 = 10
 n_hidden_3 = 8
 n_classes = 1
 layer  = 3

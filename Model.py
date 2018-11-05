@@ -433,7 +433,7 @@ def main():
         learning_coeffient = comb_coeffient
         round = 0
 
-        while (round < 30):
+        while (round < 40):
     
             print("Round: ",round)
             damp = 20
@@ -505,7 +505,7 @@ def main():
                          round += 1
                          break
             if flag_exit:
-                if round >= 30:
+                if round >= 40:
                     break
             if flag_stop:
                 break
