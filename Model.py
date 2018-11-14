@@ -11,18 +11,18 @@ np.set_printoptions(linewidth=999999)
 print('Optimized Tensorflow ',tf.__version__)
 print('Python Version ',platform.sys.version)
 
-
 n_hidden_1 = 15
 n_classes = 1
 layer  = 1
-comb_coeffient = 0.001
+comb_coeffient = 0.01
+damp_factor = 10
+iteration = 20
 loss_thresold = 1.0e-6
-accuracy_stop = 0.9
+accuracy_stop = 0.88
 
 working_dir_path = '/Data/Model/AI'
-test_ratio = 0.15
+test_ratio = 0.4
 RANDOM_SEED = 42
-
 
 def working_dir(working_dir_path):
     """ Set working directory """
@@ -34,63 +34,36 @@ def load_data():
     
     return temp
 
-def training_testing_data(data_input, expected_output ):
+def training_testing_data(data_input, expected_output, testrows):
     """ Split spectrum into train and test sample"""
-    splitted_data = train_test_split(data_input, expected_output, test_size=test_ratio,
+    splitted_data = train_test_split(data_input, expected_output, test_size = testrows,
                                      random_state=RANDOM_SEED)
     return splitted_data
 
 def init_weight(shape,bound,name):
     """ Weight initialization """
     weight = np.random.uniform(-bound,bound,shape).astype('float32')
+    
     return tf.Variable(weight,name = name)
-
-def reinit_weight(shape,bound):
-    """ Weight re-initialization """
-    weight = np.random.uniform(-bound,bound,shape).astype('float32')
-    return weight
-
 
 def init_bias_input(shape,name):
     """ Bias initialization """
-    bias = np.full(shape,0.1).astype('float32')
+    bias = tf.fill([shape],0.01)
     return tf.Variable(bias,name = name)
-
-def reinit_bias_input(shape):
-    """ Bias re-initialization """
-    bias = np.full(shape,0.1).astype('float32')
-    return bias
-
 
 def init_bias_output(shape,name):
     """ Bias_Output initialization """
-    bias = np.full(shape,0.01).astype('float32')
+    bias = tf.fill([shape],0.01)
     return tf.Variable(bias,name = name)
 
-def reinit_bias_output(shape):
-    """ Bias re-initialization """
-    bias = np.full(shape,0.01).astype('float32')
-    return bias
-
-
-def init_alpha():
+def init_alpha(name):
     """ Alpha initialization """
-    temp = 0.001
-    return tf.constant(temp)
-
-def init_beta():
-    """ Beat initialization """
-    temp = 0.1
-    return tf.constant(temp)
-
-def reinit_alpha():
-    """ Alpha initialization """
-    temp = 0.001
+    temp = tf.constant(0.001)
     return temp
 
-def reinit_beta():
+def init_beta(name):
     """ Beat initialization """
-    temp = 0.1
+    temp = tf.constant(0.1)
     return temp
 
 def regularizer(variables,layer):
@@ -105,7 +78,7 @@ def regularizer(variables,layer):
 
 def loss_func(labels,output,size):
     
-    loss = size*tf.losses.mean_squared_error(labels = labels, predictions = output)
+    loss = size*tf.losses.mean_squared_error(labels, output)
     
     return loss
 
@@ -122,17 +95,17 @@ def gra_holder(yhat,y_,variables,n_testcases):
     error = y_ - yhat
     
     loop_vars = [
-                 tf.constant(0, tf.int32),
-                 tf.TensorArray(tf.float32, size = n_testcases),
+             tf.constant(0, tf.int32),
+             tf.TensorArray(tf.float32, size = n_testcases),
     ]
-        
+    
     _, holder = tf.while_loop(
-                          lambda i, _: i < n_testcases,
-                          lambda i, result: (i+1, result.write(i, tf.gradients(error[i],variables))),loop_vars)
+                       lambda i, _: i < n_testcases,
+                       lambda i, result: (i+1, result.write(i, tf.gradients(error[i],variables))),loop_vars)
                  
     holder = holder.stack()
     print(holder.shape)
-                 
+
     return holder
 
 def gra_holder_list(yhat,variables,x,y,n_testcases,n_components):
@@ -144,10 +117,13 @@ def gra_holder_list(yhat,variables,x,y,n_testcases,n_components):
         
         if variable.name[:2] == 'W1':
             j = tf.reshape(j,[n_testcases,n_components,n_hidden_1])
+        
         elif variable.name[:2] == 'W2':
             j = tf.reshape(j,[n_testcases,n_hidden_1,n_classes])
+
         elif variable.name[:2] == 'b1':
             j = tf.reshape(j,[n_testcases,1,n_hidden_1])
+        
         elif variable.name[:2] == 'b2':
             j = tf.reshape(j,[n_testcases,1,n_classes])
         
@@ -156,7 +132,7 @@ def gra_holder_list(yhat,variables,x,y,n_testcases,n_components):
     return list
 
 def jaccob_func(yhat,x,y,n_testcases,n_components,variables):
-
+    
     paras= len(variables)
     
     list = gra_holder_list(yhat,variables,x,y,n_testcases,n_components)
@@ -165,18 +141,17 @@ def jaccob_func(yhat,x,y,n_testcases,n_components,variables):
     for count in range(paras):
         weight_holder = list[count]
         cols = weight_holder.shape[1]*weight_holder.shape[2]
-
+        
         loop_vars = [
                      tf.constant(0, tf.int32),
                      tf.TensorArray(tf.float32, size = n_testcases),
                      ]
-
+            
         _, output = tf.while_loop(
-                             lambda i, _: i < n_testcases,
-                             lambda i, result: (i+1, result.write(i,tf.reshape(weight_holder[i],[1,-1]))),loop_vars)
+                               lambda i, _: i < n_testcases,
+                               lambda i, result: (i+1, result.write(i,tf.reshape(weight_holder[i],[1,-1]))),loop_vars)
         output = output.stack()
         output = tf.reshape(output,[n_testcases,cols])
-        
         jaccob.append(output)
     
     jaccob = tf.concat(jaccob, axis=1)
@@ -226,13 +201,22 @@ def delta_weight(delta,variable_size,n_components,session):
     
     return session.run([delta_w1,delta_w2,delta_b1,delta_b2])
 
-def update_hyperparam(h,loss,regularization,model_size,n_components):
+def update_hyperparam(h,loss,regularization,model_size,n_testcases):
     
     trace_h = tf.linalg.trace(h)
     alpha = tf.divide(model_size,(2*regularization + 2*trace_h))
     gamma = model_size - 2*alpha*trace_h
-    beta = tf.divide((n_components - gamma),(2*loss))
+    beta = tf.divide((n_testcases - gamma),(2*loss))
+    
+    return alpha,beta,gamma
 
+def updated_hyperparam(h,loss,regularization,model_size,n_components, alpha):
+    
+    trace_h = tf.linalg.trace(h)
+    gamma = model_size - 2.*alpha*trace_h
+    
+    alpha = tf.divide(gamma,2*regularization)
+    beta = tf.divide((n_components - gamma),(2*loss))
     
     return alpha,beta,gamma
 
@@ -244,8 +228,7 @@ def model_relu(x,w1,w2,bias_1,bias_2):
     
     operation_2 = tf.matmul(operation_1, w2)
     operation_2 = tf.add(operation_2,bias_2)
-    
-    output = tf.nn.sigmoid(operation_2)
+    output = tf.nn.relu(operation_2)
     
     return output
 
@@ -257,7 +240,6 @@ def model_sigmoid(x,w1,w2,bias_1,bias_2):
     
     operation_2 = tf.matmul(operation_1, w2)
     operation_2 = tf.add(operation_2,bias_2)
-    
     output = tf.nn.sigmoid(operation_2)
     
     return output
@@ -265,7 +247,7 @@ def model_sigmoid(x,w1,w2,bias_1,bias_2):
 
 def model_accuracy(yhat,y_test):
     """ Accuracy of the model after a minibatch"""
-
+    
     yhat_class = tf.greater(yhat,0.5)
     y_test_class = tf.equal(y_test,1.0)
     corrections = tf.equal(yhat_class,y_test_class)
@@ -299,40 +281,39 @@ def print_spectrum(spectrum,vector_error,components):
     data = list(data)
     for i in range(len(data)):
         t.append_row(data[i])
-    
+
     print('Matrix of Test Results - Spectrum')
 
-    print('Good Work')
+print('Good Work')
 
 def output_html(a,b):
     html_str = """
         <table border=1>"""
     html_str +="<tr>"
-    
+
     for item in a:
         html_str +="<th>"+item+"</th>"
-    
+
     html_str +="</tr>"
     #indent tag
     html_str +="<indent>"
     html_str +="<tr>"
-    
+
     for item in b:
         html_str +="<td><font color=" + "&ldquo" + "red" + "&rdquo" + ">" + "&nbsp&nbsp&nbsp" +item+ "&nbsp&nbsp&nbsp" + "</font></td>"
-    
+        
     html_str +="</tr>"
     html_str +="</indent>"
     #indent tag
     html_str +="</table>"
-
+    
     Html_file= open("out_vector.html","w")
     Html_file.write(html_str)
     Html_file.close()
-
-
+    
     url = 'out_vector.html'
     chrome_path = "C://Program Files (x86)/Google/Chrome/Application/chrome.exe %s"
-    
+        
     webbrowser.get(chrome_path).open(url)
 
 def main():
@@ -340,70 +321,57 @@ def main():
     # Change working directory
     working_dir(working_dir_path)
     print(working_dir_path)
-
     
     # Load data
     data = load_data()
     rows, cols = data.shape
     spectrum = data[:,:cols-1]
     
-    # Load vector error
-    vector_result = data[:,cols-1:cols]
-    vector_result = np.reshape(vector_result,[rows,1])
-    
-    # Split data into training and testing sets
-    X_train, X_test, Y_train, Y_test = training_testing_data(spectrum, vector_result)
-    n_testcases, n_components = np.shape(X_train)
+    # Number of components and testcases in the tarining set
+    n_components = spectrum.shape[1]
+    test_rows = int(spectrum.shape[0]*test_ratio)
+    print("test sample: ",test_rows)
+    n_testcases = spectrum.shape[0] - test_rows
     
     #Size of Model
     model_size = n_components*n_hidden_1 + n_hidden_1*n_classes + n_hidden_1 + n_classes
     
-    delta = tf.zeros((model_size,1), tf.float32)
-    delta_w1 = np.empty((n_components,n_hidden_1),np.float32)
-    new_w1 = np.empty((n_components,n_hidden_1), np.float32)
+    # Load vector error
+    vector_result = data[:,cols-1:cols]
+    vector_result = np.reshape(vector_result,[rows,1])
     
-    delta_w2 = np.empty((n_hidden_1,n_classes), np.float32)
-    new_w2 = np.empty((n_hidden_1,n_classes), np.float32)
-    
-    delta_b1 = np.empty((n_hidden_1,1), np.float32)
-    new_b1 = np.empty((n_hidden_1,1), np.float32)
-    
-    delta_b2 = np.empty((n_classes,1), np.float32)
-    new_b2 = np.empty((n_classes,1), np.float32)
-    
-    j = tf.zeros((n_testcases,n_components), tf.float32)
-    h = tf.zeros((model_size,model_size), tf.float32)
-
     loop = 0
     flag_stop = False
     while(True):
-
-    
+        
+        # Split data into training and testing sets
+        
+        global X_train, X_test, Y_train, Y_test
+        X_train, X_test, Y_train, Y_test = training_testing_data(spectrum, vector_result, test_rows)
+        
         # Define the input/output
         X = tf.placeholder(tf.float32, shape=[None, n_components])
         Y = tf.placeholder(tf.float32, shape=[None, 1])
-        
+
         # Init the weights
-        W1 = init_weight((n_components, n_hidden_1),1/12,'W1')
-        W2 = init_weight((n_hidden_1, n_classes),1/4,'W2')
+        W1 = init_weight((n_components, n_hidden_1),1.,'W1')
+        W2 = init_weight((n_hidden_1, n_classes),2.,'W2')
         
         # Init the biases
         b1 = init_bias_input(n_hidden_1,'b1')
-        b2 = init_bias_output(n_classes,'b2')
+        b2 = init_bias_input(n_classes,'b2')
         
-        # Init hyperparameters
-        alpha = init_alpha()
-        beta = init_beta()
+        # Init hyper_paras
+        alpha = init_alpha('alpha')
+        beta = init_beta('beta')
         
         
-        
-        # List of variables
+        global variable
         variables = []
         for variable in tf.trainable_variables():
             variables.append(variable)
     
-
-    # Models
+        # Models
         Yhat_relu = model_relu(X,W1,W2,b1,b2)
         Yhat_sigmoid = model_sigmoid(X,W1,W2,b1,b2)
         
@@ -419,6 +387,8 @@ def main():
         # Objective
         objective_holder = objective_func(loss_holder,regularization_holder,alpha,beta)
         
+        # Size of variables
+        global variable_size
         variable_size = [0]
         for variable in variables:
             size = variable_size[-1]+tf.size(variable)
@@ -427,114 +397,112 @@ def main():
         sess = tf.Session()
         sess.run(tf.global_variables_initializer())
         sess.run(tf.local_variables_initializer())
-
+        
         print("loop: ",loop)
         accuracy = 0
         learning_coeffient = comb_coeffient
         round = 0
-
-        while (round < 40):
-    
+        
+        while (round < iteration):
+            
             print("Round: ",round)
-            damp = 20
+            damp = damp_factor
+            
+            global j, yhat
             
             yhat = sess.run(Yhat_sigmoid, feed_dict = {X:X_train,Y: Y_train})
             j = sess.run(j_holder,feed_dict = {X:X_train,Y: Y_train})
-
+            
             error = tf.cast(Y_train - yhat,tf.float32)
             objective = sess.run(objective_holder,feed_dict = {X:X_train,Y: Y_train})
             print("objective: ",objective)
             
             flag_exit = False
+            flag_record = False
             count = 1
+            
             while (count < 6):
-                 h = hessian_adj_func(j,learning_coeffient)
-                 delta = tf.matmul(j,error,True)
-                 delta = tf.matmul(h,delta)
-                 
-                 delta_w1,delta_w2,delta_b1,delta_b2 = delta_weight(delta,variable_size,n_components,sess)
                 
-                 # Update weights
-                 new_w1 = sess.run(W1 - delta_w1)
-                 new_w2 = sess.run(W2 - delta_w2)
-                 new_b1 = sess.run(b1 - delta_b1)
-                 new_b2 = sess.run(b2 - delta_b2)
-                 
-                 W1.load(new_w1,sess)
-                 W2.load(new_w2,sess)
-                 b1.load(new_b1,sess)
-                 b2.load(new_b2,sess)
-                 
-                 # Update objective
-                 new_objective = sess.run(objective_holder,feed_dict = {X:X_train,Y: Y_train})
-                 print("new_objective: ",new_objective)
-                 less_objective = sess.run(tf.less(new_objective,objective))
-                 
-                 if less_objective:
+                global h,delta,delta_w1,delta_w2,delta_b1,delta_b2
+                global new_w1,new_w2,new_w3,new_w4,new_b1,new_b2,new_b3,new_b4
+                        
+                h = hessian_adj_func(j,learning_coeffient)
+                delta = tf.matmul(j,error,True)
+                delta = tf.matmul(h,delta)
+                delta_w1,delta_w2,delta_b1,delta_b2 = delta_weight(delta,variable_size,n_components,sess)
+                
+                # Update weights
+                new_w1 = sess.run(W1 - delta_w1)
+                new_w2 = sess.run(W2 - delta_w2)
+                
+                new_b1 = sess.run(b1 - delta_b1)
+                new_b2 = sess.run(b2 - delta_b2)
+
+                
+                W1.load(new_w1,sess)
+                W2.load(new_w2,sess)
+                
+                b1.load(new_b1,sess)
+                b2.load(new_b2,sess)
+                        
+                # Update objective
+                new_objective = sess.run(objective_holder,feed_dict = {X:X_train,Y: Y_train})
+                print("new_objective: ",new_objective)
+                
+                less_objective = sess.run(tf.less(new_objective,objective))
+                if less_objective:
                     
                     h = hessian_adj_func(j_holder,comb_coeffient)
-                    para_holder = update_hyperparam(h,loss_holder,regularization_holder,model_size,n_components)
+                    para_holder = update_hyperparam(h,loss_holder,regularization_holder,model_size,n_testcases)
                     alpha,beta,gamma = sess.run(para_holder,feed_dict = {X:X_train,Y: Y_train})
                     print("%s , %s , %s"  % (alpha,beta,gamma))
                     learning_coeffient /= damp
-                    
+                                
                     yhat = sess.run(Yhat_sigmoid, feed_dict = {X:X_test,Y: Y_test})
                     accuracy = sess.run(model_accuracy(yhat,Y_test))
                     print("Accuracy: ",accuracy)
                     if(accuracy >= accuracy_stop):
-                         flag_stop = True
-                         break
-                    
+                        flag_record = True
+                        flag_stop = True
+                        break
+                                                
                     round += 1
                     flag_exit = True
                     break
-                 else:
-                     if count < 6:
+                                        
+                else:
+                    if count < 6:
                         learning_coeffient *= damp
                         
                         # Restore weights
                         W1.load(new_w1 + delta_w1,sess)
                         W2.load(new_w2 + delta_w2,sess)
+                        
                         b1.load(new_b1 + delta_b1,sess)
                         b2.load(new_b2 + delta_b2,sess)
                         
                         count += 1
                         round += 1
-                     else:
-                         learning_coeffient *= damp
-                         round += 1
-                         break
-            if flag_exit:
-                if round >= 40:
-                    break
-            if flag_stop:
+                    else:
+                        learning_coeffient *= damp
+                        round += 1
+                        break
+    
+            if flag_record:
                 break
+            
+            if flag_exit:
+                if round >= iteration:
+                    break
+
         if flag_stop:
             break
         
         loop += 1
         print("new loop")
-        # Re-init the weights
         
         tf.reset_default_graph()
-        
-        new_w1 = reinit_weight((n_components, n_hidden_1),1/12)
-        W1.load(new_w1,sess)
     
-        new_w2 = reinit_weight((n_hidden_1, n_classes),1/4)
-        W2.load(new_w2,sess)
-        
-        # Re-init the biases
-        new_b1 = reinit_bias_input(n_hidden_1)
-        b1.load(new_b1,sess)
-        
-        new_b2 = reinit_bias_output(n_classes)
-        b2.load(new_b2,sess)
-        
-        # Re-init hyperparameters
-        alpha = reinit_alpha()
-        beta = reinit_beta()
-
     sess.close
 
 if __name__ == '__main__':
