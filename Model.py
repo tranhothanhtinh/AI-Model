@@ -18,10 +18,10 @@ comb_coeffient = 0.01
 damp_factor = 10
 iteration = 20
 loss_thresold = 1.0e-6
-accuracy_stop = 0.88
+accuracy_stop = 0.9
 
 working_dir_path = '/Data/Model/AI'
-test_ratio = 0.4
+test_ratio = 0.2
 RANDOM_SEED = 42
 
 def working_dir(working_dir_path):
