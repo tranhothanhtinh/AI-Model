@@ -18,7 +18,7 @@ n_hidden_3 = 10
 n_classes = 1
 layer  = 3
 comb_coeffient = 0.01
-damp_factor = 8
+damp_factor = 10
 iteration = 20
 loss_thresold = 1.0e-6
 accuracy_stop = 0.88
@@ -424,7 +424,7 @@ def main():
         W1 = init_weight((n_components, n_hidden_1),0.25,'W1')
         W2 = init_weight((n_hidden_1, n_hidden_2),0.5,'W2')
         W3 = init_weight((n_hidden_2, n_hidden_3),0.5,'W3')
-        W4 = init_weight((n_hidden_3, n_classes),1.5,'W4')
+        W4 = init_weight((n_hidden_3, n_classes),1.,'W4')
 
         # Init the biases
         b1 = init_bias_input(n_hidden_1,'b1')

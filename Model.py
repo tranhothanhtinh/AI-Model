@@ -18,10 +18,10 @@ comb_coeffient = 0.01
 damp_factor = 10
 iteration = 20
 loss_thresold = 1.0e-6
-accuracy_stop = 0.9
+accuracy_stop = 0.85
 
 working_dir_path = '/Data/Model/AI'
-test_ratio = 0.2
+test_ratio = 0.4
 RANDOM_SEED = 42
 
 def working_dir(working_dir_path):
@@ -398,6 +398,8 @@ def main():
         sess.run(tf.global_variables_initializer())
         sess.run(tf.local_variables_initializer())
         
+        saver = tf.train.Saver()
+        
         print("loop: ",loop)
         accuracy = 0
         learning_coeffient = comb_coeffient
@@ -462,8 +464,12 @@ def main():
                     accuracy = sess.run(model_accuracy(yhat,Y_test))
                     print("Accuracy: ",accuracy)
                     if(accuracy >= accuracy_stop):
+                        
                         flag_record = True
                         flag_stop = True
+                        
+                        saver.save(sess, '/Data/Model/Save/1_layer/1_layer.ckpt')
+                        
                         break
                                                 
                     round += 1
